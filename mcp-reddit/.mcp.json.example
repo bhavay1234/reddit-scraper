@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "reddit": {
+      "command": "node",
+      "args": ["./mcp-reddit/dist/index.js"],
+      "env": {
+        "REDDIT_CLIENT_ID": "${REDDIT_CLIENT_ID}",
+        "REDDIT_CLIENT_SECRET": "${REDDIT_CLIENT_SECRET}",
+        "REDDIT_USER_AGENT": "reddit-mcp/1.0 (by /u/your_username)"
+      }
+    }
+  }
+}
