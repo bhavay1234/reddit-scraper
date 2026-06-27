@@ -62,20 +62,36 @@
     const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
     const date = (utc) => utc ? new Date(utc * 1000).toLocaleDateString() : '';
 
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(form);
       const params = new URLSearchParams();
       for (const [k, v] of fd.entries()) if (v) params.set(k, v);
       out.innerHTML = '';
-      status.textContent = 'Searching Reddit…';
       btn.disabled = true;
       try {
-        const r = await fetch('/api/research?' + params.toString());
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || 'Request failed');
-        render(data);
-        status.textContent = '';
+        // Auto-retry once if the shared/team rate limit is hit (HTTP 429).
+        for (let attempt = 0; attempt < 2; attempt++) {
+          status.textContent = 'Searching Reddit…';
+          const r = await fetch('/api/research?' + params.toString());
+          const data = await r.json();
+          if (r.status === 429 && attempt === 0) {
+            let wait = Number(r.headers.get('Retry-After')) || 10;
+            while (wait > 0) {
+              status.innerHTML = '<span class="muted">' + esc(data.error || 'Busy.') + ' Retrying in ' + wait + 's…</span>';
+              await sleep(1000);
+              wait--;
+            }
+            continue;
+          }
+          if (!r.ok) throw new Error(data.error || 'Request failed');
+          render(data);
+          status.textContent = '';
+          return;
+        }
+        throw new Error('Still busy — please try again shortly.');
       } catch (err) {
         status.innerHTML = '<span class="err">' + esc(err.message) + '</span>';
       } finally {

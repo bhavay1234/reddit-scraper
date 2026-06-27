@@ -60,14 +60,28 @@ two env vars in Vercel:
    | `UPSTASH_REDIS_REST_URL` | from the Upstash console |
    | `UPSTASH_REDIS_REST_TOKEN` | from the Upstash console |
 
-When present, each visitor is limited to **5 searches/minute**, which stops one
-person (or a script) from draining the shared Reddit quota. If these vars are
-absent the app still runs — it just skips rate limiting. The limiter only runs
-on cache *misses*, so it costs almost nothing.
+When present, two limits apply (both only on cache *misses*, so they cost
+almost nothing):
 
-To tune the limit, edit `Ratelimit.slidingWindow(5, '60 s')` in
+- **Per visitor — 5 searches/min.** Stops one person or a script from hogging
+  the shared quota.
+- **Global — 25 searches/min across everyone.** Keeps total throughput under
+  Reddit's ~100 req/min so the shared app never gets throttled or flagged when
+  many people (e.g. a whole team) research at once. When the team is at the cap,
+  users get a friendly "busy, try again in Ns" message and the UI auto-retries
+  once after the cooldown.
+
+If the Upstash vars are absent the app still runs — it just skips rate limiting.
+To tune the limits, edit `IP_PER_MIN` / `GLOBAL_PER_MIN` at the top of
 `api/research.ts`. Comments are off by default on the public endpoint (they add
 extra Reddit calls); users opt in with the "Top comments" checkbox.
+
+> **Note for larger teams:** a single free Reddit app caps the whole tool at
+> ~100 Reddit req/min. With unique-query research (where caching can't help),
+> that's roughly 25–30 searches/min shared across all users. If that's too
+> tight for sustained heavy use, request a higher quota from Reddit or run a
+> second app — but the global limiter ensures you degrade gracefully rather
+> than getting the app throttled.
 
 ## API
 
