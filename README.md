@@ -32,11 +32,42 @@ Both share one implementation of the research logic in
    `REDDIT_USERNAME`, `REDDIT_PASSWORD`.
 
 4. **Deploy.** Open the public URL, type a theme/keyword/brand, and you'll get
-   the relevant discussions, communities, recent mentions, and top comments.
+   the relevant discussions, communities, recent mentions, and (on request) top
+   comments.
 
-> Reddit requires a unique, descriptive `User-Agent` and enforces ~60
-> requests/minute per token. The app uses application-only (read-only) access
-> by default.
+> Reddit requires a unique, descriptive `User-Agent` and enforces ~60–100
+> requests/minute per app. The app uses application-only (read-only) access by
+> default.
+
+## Sharing it publicly (scaling & rate limits)
+
+A single Reddit app is shared by **everyone** who opens the link, and each
+search makes several Reddit calls — so a public/LinkedIn link needs two
+protections. Both are built in:
+
+**1. Edge caching (automatic, no setup).** Every response is cached on Vercel's
+CDN for 15 minutes per unique query. Repeated searches for the same term (the
+common case when a link is shared) are served from the edge **without hitting
+Reddit or even re-invoking the function**. This absorbs the bulk of public
+traffic for free.
+
+**2. Per-IP rate limiting (recommended before sharing widely).** Enable it by
+creating a free [Upstash Redis](https://upstash.com/) database and adding its
+two env vars in Vercel:
+
+   | Name | Value |
+   | ---- | ----- |
+   | `UPSTASH_REDIS_REST_URL` | from the Upstash console |
+   | `UPSTASH_REDIS_REST_TOKEN` | from the Upstash console |
+
+When present, each visitor is limited to **5 searches/minute**, which stops one
+person (or a script) from draining the shared Reddit quota. If these vars are
+absent the app still runs — it just skips rate limiting. The limiter only runs
+on cache *misses*, so it costs almost nothing.
+
+To tune the limit, edit `Ratelimit.slidingWindow(5, '60 s')` in
+`api/research.ts`. Comments are off by default on the public endpoint (they add
+extra Reddit calls); users opt in with the "Top comments" checkbox.
 
 ## API
 

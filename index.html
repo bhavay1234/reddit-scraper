@@ -16,6 +16,7 @@
     input[name=query] { flex:1 1 260px; }
     button { background:var(--acc); border-color:var(--acc); color:#fff; font-weight:600; cursor:pointer; }
     button:disabled { opacity:.6; cursor:default; }
+    .chk { display:flex; align-items:center; gap:6px; color:var(--mut); font-size:14px; padding:0 4px; }
     .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
     .card a { color:var(--fg); text-decoration:none; font-weight:600; }
     .card a:hover { text-decoration:underline; }
@@ -45,6 +46,7 @@
         <option value="year">Past year</option>
         <option value="all">All time</option>
       </select>
+      <label class="chk"><input type="checkbox" name="include_comments" value="true" /> Top comments</label>
       <button type="submit">Research</button>
     </form>
 
