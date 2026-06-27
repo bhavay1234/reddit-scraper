@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reddit Research</title>
+  <style>
+    :root { --bg:#0f1115; --card:#171a21; --line:#262b36; --fg:#e6e8ec; --mut:#9aa3b2; --acc:#ff4500; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:15px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+    .wrap { max-width:820px; margin:0 auto; padding:32px 16px 64px; }
+    h1 { font-size:24px; margin:0 0 4px; }
+    .sub { color:var(--mut); margin:0 0 24px; }
+    form { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:24px; }
+    input, select, button { font:inherit; border:1px solid var(--line); border-radius:8px; padding:10px 12px; background:var(--card); color:var(--fg); }
+    input[name=query] { flex:1 1 260px; }
+    button { background:var(--acc); border-color:var(--acc); color:#fff; font-weight:600; cursor:pointer; }
+    button:disabled { opacity:.6; cursor:default; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+    .card a { color:var(--fg); text-decoration:none; font-weight:600; }
+    .card a:hover { text-decoration:underline; }
+    .meta { color:var(--mut); font-size:13px; margin-top:4px; }
+    .snippet { color:var(--mut); margin-top:8px; font-size:14px; }
+    h2 { font-size:16px; margin:28px 0 12px; border-bottom:1px solid var(--line); padding-bottom:6px; }
+    .pills { display:flex; flex-wrap:wrap; gap:8px; }
+    .pill { background:var(--card); border:1px solid var(--line); border-radius:999px; padding:6px 12px; font-size:13px; }
+    .pill b { color:var(--acc); }
+    .cmt { border-left:2px solid var(--line); padding-left:10px; margin-top:8px; font-size:14px; color:var(--mut); }
+    .err { color:#ff6b6b; }
+    .muted { color:var(--mut); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Reddit Research</h1>
+    <p class="sub">Enter a theme, keyword, topic, or brand. See what Reddit is saying.</p>
+
+    <form id="f">
+      <input name="query" placeholder="e.g. Notion, electric SUV range anxiety" required />
+      <input name="subreddit" placeholder="subreddit (optional)" />
+      <select name="time">
+        <option value="day">Past day</option>
+        <option value="week">Past week</option>
+        <option value="month" selected>Past month</option>
+        <option value="year">Past year</option>
+        <option value="all">All time</option>
+      </select>
+      <button type="submit">Research</button>
+    </form>
+
+    <div id="status" class="muted"></div>
+    <div id="out"></div>
+  </div>
+
+  <script>
+    const form = document.getElementById('f');
+    const out = document.getElementById('out');
+    const status = document.getElementById('status');
+    const btn = form.querySelector('button');
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+    const date = (utc) => utc ? new Date(utc * 1000).toLocaleDateString() : '';
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const params = new URLSearchParams();
+      for (const [k, v] of fd.entries()) if (v) params.set(k, v);
+      out.innerHTML = '';
+      status.textContent = 'Searching Reddit…';
+      btn.disabled = true;
+      try {
+        const r = await fetch('/api/research?' + params.toString());
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Request failed');
+        render(data);
+        status.textContent = '';
+      } catch (err) {
+        status.innerHTML = '<span class="err">' + esc(err.message) + '</span>';
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    function render(d) {
+      let h = '';
+      const communities = d.relevant_communities || [];
+      if (communities.length) {
+        h += '<h2>Communities</h2><div class="pills">';
+        h += communities.map((c) =>
+          '<span class="pill"><b>r/' + esc(c.name) + '</b> · ' + (c.subscribers || 0).toLocaleString() + '</span>'
+        ).join('');
+        h += '</div>';
+      }
+      if ((d.top_subreddits || []).length) {
+        h += '<h2>Where it comes up</h2><div class="pills">';
+        h += d.top_subreddits.map((s) =>
+          '<span class="pill">r/' + esc(s.name) + ' <b>' + s.post_count + '</b></span>'
+        ).join('');
+        h += '</div>';
+      }
+
+      h += '<h2>Relevant discussions</h2>';
+      if (!(d.posts || []).length) {
+        h += '<p class="muted">No matching posts found.</p>';
+      } else {
+        h += d.posts.map((p) =>
+          '<div class="card"><a href="' + esc(p.permalink) + '" target="_blank" rel="noopener">' + esc(p.title) + '</a>' +
+          '<div class="meta">r/' + esc(p.subreddit) + ' · ' + (p.score || 0) + ' pts · ' + (p.num_comments || 0) + ' comments · ' + date(p.created_utc) + '</div>' +
+          (p.snippet ? '<div class="snippet">' + esc(p.snippet) + '</div>' : '') +
+          '</div>'
+        ).join('');
+      }
+
+      if ((d.highlights || []).length) {
+        h += '<h2>Top comments</h2>';
+        h += d.highlights.map((hl) =>
+          '<div class="card"><a href="' + esc(hl.permalink) + '" target="_blank" rel="noopener">' + esc(hl.post_title) + '</a>' +
+          (hl.top_comments || []).map((c) =>
+            '<div class="cmt"><b>u/' + esc(c.author) + '</b> (' + (c.score || 0) + ') — ' + esc(c.body) + '</div>'
+          ).join('') +
+          '</div>'
+        ).join('');
+      }
+
+      if ((d.recent_mentions || []).length) {
+        h += '<h2>Recent mentions</h2>';
+        h += d.recent_mentions.map((p) =>
+          '<div class="card"><a href="' + esc(p.permalink) + '" target="_blank" rel="noopener">' + esc(p.title) + '</a>' +
+          '<div class="meta">r/' + esc(p.subreddit) + ' · ' + (p.num_comments || 0) + ' comments · ' + date(p.created_utc) + '</div></div>'
+        ).join('');
+      }
+
+      out.innerHTML = h;
+    }
+  </script>
+</body>
+</html>
