@@ -7,27 +7,19 @@ import { RedditClient, configFromEnv, research } from '../mcp-reddit/src/reddit.
 // served from Vercel's edge WITHOUT re-invoking this function or hitting Reddit.
 const CACHE_TTL = 900; // 15 minutes
 
-// Per-visitor cap: stops one person (or a script) from hogging the shared quota.
-const IP_PER_MIN = 5;
 // Global cap across ALL users: keeps total throughput under Reddit's ~100 req/min.
 // Each search makes ~3 Reddit calls, so 25/min ≈ 75 calls/min — safe headroom.
+// (No per-IP limit: the team shares an office, hence a single NAT'd IP.)
 const GLOBAL_PER_MIN = 25;
 
 // Rate limiting is enabled automatically only when Upstash is configured
 // (UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN); otherwise it's a no-op so
-// the app still works. Limiters run only on cache MISSES — i.e. exactly when a
-// request would otherwise consume the shared Reddit quota.
+// the app still works. The limiter runs only on cache MISSES — i.e. exactly when
+// a request would otherwise consume the shared Reddit quota.
 const redis =
   process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
     ? Redis.fromEnv()
     : null;
-const ipLimit = redis
-  ? new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(IP_PER_MIN, '60 s'),
-      prefix: 'reddit-research:ip',
-    })
-  : null;
 const globalLimit = redis
   ? new Ratelimit({
       redis,
@@ -48,18 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  // 1) Per-IP limit, then 2) global team-wide limit.
-  if (ipLimit) {
-    const ip =
-      (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0].trim() || 'anon';
-    const { success, reset } = await ipLimit.limit(ip);
-    if (!success) {
-      const secs = waitSecs(reset);
-      res.setHeader('Retry-After', secs);
-      res.status(429).json({ error: `Too many searches from your device. Try again in ${secs}s.` });
-      return;
-    }
-  }
+  // Global team-wide limit (keeps total throughput under Reddit's ~100 req/min).
   if (globalLimit) {
     const { success, reset } = await globalLimit.limit('all');
     if (!success) {

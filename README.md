@@ -60,21 +60,19 @@ two env vars in Vercel:
    | `UPSTASH_REDIS_REST_URL` | from the Upstash console |
    | `UPSTASH_REDIS_REST_TOKEN` | from the Upstash console |
 
-When present, two limits apply (both only on cache *misses*, so they cost
-almost nothing):
+When present, a **global limit of 25 searches/min across everyone** applies
+(only on cache *misses*, so it costs almost nothing). This keeps total
+throughput under Reddit's ~100 req/min so the shared app never gets throttled or
+flagged when the whole team researches at once. At the cap, users get a friendly
+"busy, try again in Ns" message and the UI auto-retries once after the cooldown.
 
-- **Per visitor — 5 searches/min.** Stops one person or a script from hogging
-  the shared quota.
-- **Global — 25 searches/min across everyone.** Keeps total throughput under
-  Reddit's ~100 req/min so the shared app never gets throttled or flagged when
-  many people (e.g. a whole team) research at once. When the team is at the cap,
-  users get a friendly "busy, try again in Ns" message and the UI auto-retries
-  once after the cooldown.
+There is intentionally **no per-IP limit** — the team works from one office
+(a single shared IP), so a per-IP cap would throttle everyone together.
 
 If the Upstash vars are absent the app still runs — it just skips rate limiting.
-To tune the limits, edit `IP_PER_MIN` / `GLOBAL_PER_MIN` at the top of
-`api/research.ts`. Comments are off by default on the public endpoint (they add
-extra Reddit calls); users opt in with the "Top comments" checkbox.
+To tune the limit, edit `GLOBAL_PER_MIN` at the top of `api/research.ts`.
+Comments are off by default on the public endpoint (they add extra Reddit
+calls); users opt in with the "Top comments" checkbox.
 
 > **Note for larger teams:** a single free Reddit app caps the whole tool at
 > ~100 Reddit req/min. With unique-query research (where caching can't help),
