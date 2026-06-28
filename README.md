@@ -1,92 +1,83 @@
 # reddit-scraper
 
-Two ways to use the same read-only Reddit research engine:
+A read-only Reddit research tool. Enter a theme, keyword, topic, or brand name
+and get the relevant discussions, the communities involved, and recent mentions.
 
-- **Web app** (`/` + `/api`) — a frontend + serverless API you can deploy to
-  Vercel and open at a public URL.
-- **MCP server** (`mcp-reddit/`) — the same logic exposed as a Model Context
-  Protocol server for Claude Desktop / Claude Code. See
-  [`mcp-reddit/README.md`](mcp-reddit/README.md).
+- **Web app** (`/` + `/api`) — a frontend + serverless API you deploy to Vercel
+  and open at a public URL. **Data comes from [Apify](https://apify.com/)** (a
+  Reddit scraper Actor), so it needs **no Reddit account or API approval** — just
+  an Apify token.
+- **MCP server** (`mcp-reddit/`) — a separate Model Context Protocol server for
+  Claude Desktop / Claude Code. It uses Reddit's official OAuth API (needs Reddit
+  credentials). See [`mcp-reddit/README.md`](mcp-reddit/README.md).
 
-Both share one implementation of the research logic in
-`mcp-reddit/src/reddit.ts`.
+> **Why Apify?** Reddit's own Data API now gates app creation behind an approval
+> process. Apify runs the scraping for you and exposes it via a simple API, which
+> keeps this tool working without fighting Reddit's approval flow.
 
 ## Deploy to Vercel
 
-1. **Get Reddit API credentials** at <https://www.reddit.com/prefs/apps> —
-   create an app (type `script` or `web app`). The **client id** is the string
-   under the app name; the **client secret** is labelled "secret".
+1. **Get an Apify API token.** Sign up at <https://console.apify.com>, then copy
+   your token from **Settings → Integrations → API token** (or
+   <https://console.apify.com/account/integrations>). New accounts include free
+   monthly credits.
 
-2. **Import the repo** into Vercel (no build settings needed — it's a static
+2. **Pick the Reddit Actor** (optional). The default is
+   [`trudax/reddit-scraper-lite`](https://apify.com/trudax/reddit-scraper-lite).
+   To use a different one, set `APIFY_ACTOR` to its id in `user~actor` form
+   (e.g. `trudax~reddit-scraper`).
+
+3. **Import the repo** into Vercel (no build settings needed — it's a static
    `index.html` plus a serverless function in `api/`).
 
-3. **Add Environment Variables** in the Vercel project settings:
+4. **Add Environment Variables** in the Vercel project settings:
 
    | Name | Value |
    | ---- | ----- |
-   | `REDDIT_CLIENT_ID` | your client id |
-   | `REDDIT_CLIENT_SECRET` | your client secret |
-   | `REDDIT_USER_AGENT` | `reddit-mcp/1.0 (by /u/your_username)` |
+   | `APIFY_API_TOKEN` | your Apify token (required) |
+   | `APIFY_ACTOR` | Actor id, e.g. `trudax~reddit-scraper-lite` (optional) |
 
-   Optional (for account-context reads, requires a `script` app):
-   `REDDIT_USERNAME`, `REDDIT_PASSWORD`.
+   Plus the two Upstash vars below to enable the shared rate limiter.
 
-4. **Deploy.** Open the public URL, type a theme/keyword/brand, and you'll get
-   the relevant discussions, communities, recent mentions, and (on request) top
-   comments.
+5. **Deploy.** Open the public URL, type a theme/keyword/brand, and you'll get
+   the relevant discussions, the communities they come up in, and recent
+   mentions.
 
-> Reddit requires a unique, descriptive `User-Agent` and enforces ~60–100
-> requests/minute per app. The app uses application-only (read-only) access by
-> default.
+> **First-call latency:** an Apify Actor run takes ~20–60s, so the *first* search
+> for a term is slow. After that it's cached for 15 minutes (see below), so
+> repeats are instant. The serverless function is configured with a 60s timeout.
 
-## Sharing it publicly (scaling & rate limits)
+## Cost & rate limiting (for team use)
 
-A single Reddit app is shared by **everyone** who opens the link, and each
-search makes several Reddit calls — so a public/LinkedIn link needs two
-protections. Both are built in:
+Every *unique* search runs an Apify Actor, which spends Apify credits — so two
+protections are built in:
 
-**1. Edge caching (automatic, no setup).** Every response is cached on Vercel's
-CDN for 15 minutes per unique query. Repeated searches for the same term (the
-common case when a link is shared) are served from the edge **without hitting
-Reddit or even re-invoking the function**. This absorbs the bulk of public
-traffic for free.
+**1. Edge caching (automatic, no setup).** Each response is cached on Vercel's
+CDN for 15 minutes per unique query. Repeated searches for the same term are
+served from the edge **without re-running Apify** — saving both time and credits.
 
-**2. Per-IP rate limiting (recommended before sharing widely).** Enable it by
-creating a free [Upstash Redis](https://upstash.com/) database and adding its
-two env vars in Vercel:
+**2. Global rate limit (recommended).** Create a free
+[Upstash Redis](https://upstash.com/) database and add its two env vars:
 
    | Name | Value |
    | ---- | ----- |
    | `UPSTASH_REDIS_REST_URL` | from the Upstash console |
    | `UPSTASH_REDIS_REST_TOKEN` | from the Upstash console |
 
-When present, a **global limit of 25 searches/min across everyone** applies
-(only on cache *misses*, so it costs almost nothing). This keeps total
-throughput under Reddit's ~100 req/min so the shared app never gets throttled or
-flagged when the whole team researches at once. At the cap, users get a friendly
-"busy, try again in Ns" message and the UI auto-retries once after the cooldown.
+This caps the whole team at **25 searches/min** (only on cache *misses*), so a
+busy day can't unexpectedly burn through your Apify credits. At the cap, users
+get a friendly "busy, try again in Ns" message and the UI auto-retries once.
 
-There is intentionally **no per-IP limit** — the team works from one office
-(a single shared IP), so a per-IP cap would throttle everyone together.
-
-If the Upstash vars are absent the app still runs — it just skips rate limiting.
-To tune the limit, edit `GLOBAL_PER_MIN` at the top of `api/research.ts`.
-Comments are off by default on the public endpoint (they add extra Reddit
-calls); users opt in with the "Top comments" checkbox.
-
-> **Note for larger teams:** a single free Reddit app caps the whole tool at
-> ~100 Reddit req/min. With unique-query research (where caching can't help),
-> that's roughly 25–30 searches/min shared across all users. If that's too
-> tight for sustained heavy use, request a higher quota from Reddit or run a
-> second app — but the global limiter ensures you degrade gracefully rather
-> than getting the app throttled.
+There is intentionally **no per-IP limit** — the team works from one office (a
+single shared IP), so a per-IP cap would throttle everyone together. If the
+Upstash vars are absent the app still runs; it just skips the limit. To tune it,
+edit `GLOBAL_PER_MIN` at the top of `api/research.ts`.
 
 ## API
 
-`GET /api/research?query=<term>&time=<day|week|month|year|all>&subreddit=<optional>&include_comments=<true|false>`
+`GET /api/research?query=<term>&subreddit=<optional>&limit=<1-50>`
 
-Returns JSON: `relevant_communities`, `top_subreddits`, `posts`,
-`recent_mentions`, and `highlights` (top comments).
+Returns JSON: `query`, `time`, `top_subreddits`, `posts`, and `recent_mentions`.
 
 ## Run locally
 
@@ -94,5 +85,12 @@ Returns JSON: `relevant_communities`, `top_subreddits`, `posts`,
 vercel dev        # serves index.html + /api with your env vars
 ```
 
-(Or use the [Vercel CLI](https://vercel.com/docs/cli). Set the env vars above in
-a `.env` file or your shell first.)
+Set `APIFY_API_TOKEN` (and optionally the Upstash vars) in a `.env` file or your
+shell first. See [the Vercel CLI docs](https://vercel.com/docs/cli).
+
+## Adjusting the data mapping
+
+Different Apify Reddit Actors return slightly different field names. The mapping
+lives in `lib/apify.ts` (`shapePost`) and reads several common aliases for each
+field. If a column comes back empty after your first real run, check one dataset
+item in the Apify console and add its key to the relevant `pick([...])` list.

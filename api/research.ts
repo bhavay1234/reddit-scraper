@@ -1,21 +1,23 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
-import { RedditClient, configFromEnv, research } from '../mcp-reddit/src/reddit.js';
+import { research } from '../lib/apify.js';
+
+// Apify Actor runs can take 20-60s, so allow a longer function timeout.
+export const config = { maxDuration: 60 };
 
 // How long the CDN caches each unique query. Popular/repeated searches are
-// served from Vercel's edge WITHOUT re-invoking this function or hitting Reddit.
+// served from Vercel's edge WITHOUT re-running this function or hitting Apify.
 const CACHE_TTL = 900; // 15 minutes
 
-// Global cap across ALL users: keeps total throughput under Reddit's ~100 req/min.
-// Each search makes ~3 Reddit calls, so 25/min ≈ 75 calls/min — safe headroom.
-// (No per-IP limit: the team shares an office, hence a single NAT'd IP.)
+// Global cap across ALL users. Each search runs an Apify Actor (which costs
+// credits), so this protects both your Apify budget and avoids hammering it.
 const GLOBAL_PER_MIN = 25;
 
 // Rate limiting is enabled automatically only when Upstash is configured
-// (UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN); otherwise it's a no-op so
-// the app still works. The limiter runs only on cache MISSES — i.e. exactly when
-// a request would otherwise consume the shared Reddit quota.
+// (UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN); otherwise it's a no-op.
+// It runs only on cache MISSES — i.e. exactly when a request would spend Apify
+// credits. (No per-IP limit: the team shares an office, hence one shared IP.)
 const redis =
   process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
     ? Redis.fromEnv()
@@ -30,9 +32,6 @@ const globalLimit = redis
 
 const waitSecs = (reset: number) => Math.max(1, Math.ceil((reset - Date.now()) / 1000));
 
-// Reused across warm invocations so the OAuth token is cached, not re-fetched.
-let client: RedditClient | null = null;
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const query = (req.query.query ?? req.query.q) as string | undefined;
   if (!query) {
@@ -40,7 +39,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  // Global team-wide limit (keeps total throughput under Reddit's ~100 req/min).
   if (globalLimit) {
     const { success, reset } = await globalLimit.limit('all');
     if (!success) {
@@ -54,19 +52,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    client ??= new RedditClient(configFromEnv());
-    const data = await research(client, {
+    const data = await research({
       query,
       subreddit: (req.query.subreddit as string) || undefined,
-      time: (req.query.time as string) || 'month',
-      // Capped for public use to limit fan-out (each post can add a Reddit call).
-      limit: Math.min(req.query.limit ? Number(req.query.limit) : 15, 25),
-      // Off by default: comments add up to 3 extra Reddit requests per search.
-      include_comments: req.query.include_comments === 'true',
+      time: (req.query.time as string) || 'all',
+      limit: Math.min(req.query.limit ? Number(req.query.limit) : 20, 50),
     });
 
-    // Tell Vercel's CDN to cache this query at the edge. Repeat searches for the
-    // same term are then served globally without touching Reddit or this function.
+    // Cache this query on Vercel's CDN so repeats are served without re-running Apify.
     res.setHeader('Cache-Control', `public, s-maxage=${CACHE_TTL}, stale-while-revalidate=3600`);
     res.status(200).json(data);
   } catch (err) {
