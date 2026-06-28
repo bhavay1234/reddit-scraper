@@ -57,6 +57,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       subreddit: (req.query.subreddit as string) || undefined,
       time: (req.query.time as string) || 'all',
       limit: Math.min(req.query.limit ? Number(req.query.limit) : 20, 50),
+      // Comments are included by default (UGC value); set include_comments=false to skip.
+      includeComments: req.query.include_comments !== 'false',
     });
 
     // Cache this query on Vercel's CDN so repeats are served without re-running Apify.

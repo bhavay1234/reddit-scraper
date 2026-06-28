@@ -40,12 +40,14 @@ and get the relevant discussions, the communities involved, and recent mentions.
    Plus the two Upstash vars below to enable the shared rate limiter.
 
 5. **Deploy.** Open the public URL, type a theme/keyword/brand, and you'll get
-   the relevant discussions, the communities they come up in, and recent
-   mentions.
+   the relevant discussions, the communities they come up in, recent mentions,
+   and top comments from the most-discussed threads (the UGC).
 
 > **First-call latency:** an Apify Actor run takes ~20–60s, so the *first* search
-> for a term is slow. After that it's cached for 15 minutes (see below), so
-> repeats are instant. The serverless function is configured with a 60s timeout.
+> for a term is slow — and scraping comments (on by default) roughly doubles that.
+> After that it's cached for 15 minutes (see below), so repeats are instant. The
+> serverless function is configured with a 60s timeout; if comment-heavy searches
+> time out, untick **Top comments** in the UI (or lower `limit`).
 
 ## Cost & rate limiting (for team use)
 
@@ -75,9 +77,11 @@ edit `GLOBAL_PER_MIN` at the top of `api/research.ts`.
 
 ## API
 
-`GET /api/research?query=<term>&subreddit=<optional>&limit=<1-50>`
+`GET /api/research?query=<term>&subreddit=<optional>&limit=<1-50>&include_comments=<true|false>`
 
-Returns JSON: `query`, `time`, `top_subreddits`, `posts`, and `recent_mentions`.
+Returns JSON: `query`, `time`, `top_subreddits`, `posts`, `recent_mentions`, and
+`highlights` (top comments per leading thread; present when `include_comments` is
+not `false`).
 
 ## Run locally
 
@@ -91,6 +95,8 @@ shell first. See [the Vercel CLI docs](https://vercel.com/docs/cli).
 ## Adjusting the data mapping
 
 Different Apify Reddit Actors return slightly different field names. The mapping
-lives in `lib/apify.ts` (`shapePost`) and reads several common aliases for each
-field. If a column comes back empty after your first real run, check one dataset
-item in the Apify console and add its key to the relevant `pick([...])` list.
+lives in `lib/apify.ts` (`shapePost` for posts, `shapeComment` for comments) and
+reads several common aliases for each field. If a column comes back empty after
+your first real run, check one dataset item in the Apify console and add its key
+to the relevant `pick([...])` list. Comments are handled whether the Actor embeds
+them on each post or returns them as standalone items.
